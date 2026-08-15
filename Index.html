@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>360 Portfolio Builder v2.7 — Scene Names + Default Bubble</title>
+<style>
+:root{--bg:#0c0e11;--panel:#15181d;--panel2:#1d2127;--line:#2b3038;--text:#f3f5f7;--muted:#a5acb7;--accent:#6aaeff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+header{padding:20px 24px;border-bottom:1px solid var(--line)}
+header h1{margin:0 0 5px;font-size:20px} header p{margin:0;color:var(--muted);font-size:14px}
+main{max-width:1180px;margin:auto;padding:22px;display:grid;grid-template-columns:390px 1fr;gap:20px}
+.panel{border:1px solid var(--line);background:var(--panel);border-radius:15px;padding:16px}
+.stack{display:grid;gap:13px}
+label{display:grid;gap:7px;color:var(--muted);font-size:13px}
+input,select,button{font:inherit}
+input[type=text],select,input[type=number]{width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:9px;background:var(--panel2);color:var(--text)}
+button{padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer}
+button.primary{background:var(--accent);border-color:transparent;color:#07121f;font-weight:700}
+button:disabled{opacity:.45;cursor:not-allowed}
+.hint{font-size:12px;color:var(--muted);line-height:1.5}
+.drop{border:1px dashed #4c5664;border-radius:12px;padding:17px;text-align:center;color:var(--muted)}
+.list{display:grid;gap:8px;max-height:300px;overflow:auto}
+.item{padding:10px;border:1px solid var(--line);border-radius:10px;background:#111419}
+.item strong{display:block;font-size:13px}.item small{color:var(--muted)}
+.row{display:flex;gap:8px;align-items:center}.row .grow{flex:1}
+#previewWrap{position:relative;height:590px;border:1px solid var(--line);border-radius:15px;overflow:hidden;background:#060708}
+#previewCanvas{width:100%;height:100%;display:block;cursor:grab}
+#previewCanvas:active{cursor:grabbing}
+.center{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);text-align:center;padding:30px;pointer-events:none}
+.toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px}
+.progress{height:7px;background:#242931;border-radius:99px;overflow:hidden}.progress div{height:100%;width:0;background:var(--accent)}
+
+.thumb-strip{display:flex;flex-wrap:wrap;gap:10px;width:100%;align-items:flex-start}
+.thumb-btn{position:relative;padding:0;overflow:hidden;width:150px;height:90px;flex:0 0 150px;border-radius:10px;background:#0c0f13;border:1px solid var(--line);cursor:pointer}
+.thumb-btn img{display:block;width:150px;height:90px;object-fit:cover}
+.thumb-btn span{position:absolute;left:0;right:0;bottom:0;padding:6px 8px;background:linear-gradient(transparent,rgba(0,0,0,.78));color:#fff;text-align:left;font-size:11px}
+.thumb-btn.active{outline:2px solid var(--accent);border-color:transparent}
+@media(max-width:900px){main{grid-template-columns:1fr}#previewWrap{height:470px}}
+</style>
+</head>
+<body>
+<header>
+<h1>360 Portfolio Builder v2.3 — Project Preview</h1>
+<p>TIFF/JPG/PNG → interactive 360° scenes → preview whole projects → separate project websites.</p>
+</header>
+<main>
+<section class="panel stack">
+  <label>1. Add panorama files
+    <input id="files" type="file" multiple accept=".tif,.tiff,.jpg,.jpeg,.png">
+  </label>
+  <div id="drop" class="drop">Drag TIFF / JPG / PNG panoramas here</div>
+  <div class="hint">Use 2:1 equirectangular images such as 8192 × 4096.</div>
+
+  <label>Export width
+    <select id="maxWidth">
+      <option value="8192" selected>8192 px</option>
+      <option value="6144">6144 px</option>
+      <option value="4096">4096 px</option>
+    </select>
+  </label>
+  <label>JPEG quality
+    <input id="quality" type="number" min=".5" max="1" step=".05" value=".9">
+  </label>
+  <div id="status" class="hint">No files loaded.</div>
+  <div class="progress"><div id="bar"></div></div>
+
+  <div>
+    <div class="row" style="margin-bottom:8px"><strong class="grow">Scenes</strong><button id="clear">Clear</button></div>
+    <div id="scenes" class="list"></div>
+  </div>
+
+  <div class="panel stack" style="background:#101318">
+    <label>Project name<input id="projectName" type="text" placeholder="e.g. Riverside Lobby"></label>
+    <label>Folder / URL slug<input id="slug" type="text" placeholder="e.g. riverside-lobby"></label>
+    <button id="makeProject">Create project from selected scenes</button>
+  </div>
+
+  <div><strong>Projects</strong><div id="projects" class="list" style="margin-top:8px"></div></div>
+  <button id="export" class="primary" disabled>Export project websites (.zip)</button>
+  <div class="hint">Each project gets its own folder and <code>index.html</code>. The exported viewer is pure WebGL and does not need Pannellum or krpano.</div>
+</section>
+
+<section>
+  <div class="toolbar"><span id="previewTitle" class="hint">360 Preview</span><span class="hint">Drag to look · wheel to zoom</span></div>
+  <div id="previewWrap">
+    <canvas id="previewCanvas"></canvas>
+    <div id="empty" class="center">Load a panorama, then click Preview.</div>
+  </div>
+  <div id="debugPanel" class="hint" style="margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:10px">
+    Diagnostic: upload one TIFF, then click Preview.
+  </div>
+  <div id="projectPreviewBar" class="panel" style="display:none;margin-top:12px;padding:12px;background:#101318">
+    <div class="row" style="margin-bottom:8px">
+      <strong class="grow" id="projectPreviewName">Project Preview</strong>
+      <button id="closeProjectPreview" type="button">Close project preview</button>
+    </div>
+    <div id="projectSceneButtons" class="thumb-strip"></div>
+  </div>
+</section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/utif@3.1.0/UTIF.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script>
+const S={scenes:[],projects:[],preview:null};
+const $=q=>document.querySelector(q);
+const esc=s=>(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const slugify=s=>(s||'project').toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'project';
+$('#projectName').addEventListener('input',e=>{if(!$('#slug').dataset.touched)$('#slug').value=slugify(e.target.value)});
+$('#slug').addEventListener('input',e=>e.target.dataset.touched='1');
+
+function progress(p,t){$('#bar').style.width=Math.max(0,Math.min(100,p))+'%';if(t)$('#status').textContent=t}
+async function decodeFile(file){
+  const ext=file.name.split('.').pop().toLowerCase();
+  const buf=await file.arrayBuffer();
+
+  let canvas=document.createElement('canvas');
+  let ctx=canvas.getContext('2d',{alpha:false});
+
+  if(ext==='tif'||ext==='tiff'){
+    if(typeof UTIF==='undefined') throw new Error('TIFF decoder did not load');
+    const ifds=UTIF.decode(buf);
+    if(!ifds || !ifds.length) throw new Error('Could not decode TIFF');
+    UTIF.decodeImage(buf,ifds[0]);
+    const rgba=UTIF.toRGBA8(ifds[0]);
+    const w=ifds[0].width, h=ifds[0].height;
+    canvas.width=w; canvas.height=h;
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba),w,h),0,0);
+  } else {
+    const blob=new Blob([buf],{type:file.type||'image/jpeg'});
+    const img=await createImageBitmap(blob);
+    canvas.width=img.width; canvas.height=img.height;
+    ctx.drawImage(img,0,0);
+    img.close();
+  }
+
+  const originalW=canvas.width, originalH=canvas.height;
+  const maxW=parseInt($('#maxWidth').value,10);
+
+  if(canvas.width>maxW){
+    const targetH=Math.round(canvas.height*maxW/canvas.width);
+    const c2=document.createElement('canvas');
+    c2.width=maxW; c2.height=targetH;
+    const c2x=c2.getContext('2d',{alpha:false});
+    c2x.imageSmoothingEnabled=true;
+    c2x.imageSmoothingQuality='high';
+    c2x.drawImage(canvas,0,0,maxW,targetH);
+    canvas=c2;
+  }
+
+  const q=Math.max(.5,Math.min(1,parseFloat($('#quality').value)||.9));
+
+  // IMPORTANT FIX:
+  // Use a data URL for PREVIEW instead of an object/blob URL.
+  // Some in-app / sandbox browsers block blob: image textures.
+  const previewURL=canvas.toDataURL('image/jpeg',q);
+
+  // Keep a normal JPEG blob only for ZIP export.
+  let jpegBlob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',q));
+  if(!jpegBlob){
+    const b64=previewURL.split(',')[1];
+    const bin=atob(b64);
+    const bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+    jpegBlob=new Blob([bytes],{type:'image/jpeg'});
+  }
+
+  return {
+    id:crypto.randomUUID(),
+    name:file.name,
+    title:file.name.replace(/\.[^.]+$/,''),
+    displayName:file.name.replace(/\.[^.]+$/,''),
+    width:canvas.width,
+    height:canvas.height,
+    originalWidth:originalW,
+    originalHeight:originalH,
+    blob:jpegBlob,
+    url:previewURL,
+    selected:true
+  };
+}
+
+async function addFiles(files){
+ const a=[...files];for(let i=0;i<a.length;i++){
+   progress(i/a.length*100,`Processing ${i+1}/${a.length}: ${a[i].name}`);
+   try{S.scenes.push(await decodeFile(a[i]))}catch(e){alert(a[i].name+': '+e.message)}
+   renderScenes(); await new Promise(r=>setTimeout(r,10));
+ }
+ progress(100,`${S.scenes.length} panorama(s) ready.`);setTimeout(()=>$('#bar').style.width='0%',500);
+ if(S.scenes.length&&!S.preview)preview(S.scenes[0]);
+}
+$('#files').addEventListener('change',e=>addFiles(e.target.files));
+['dragenter','dragover'].forEach(n=>$('#drop').addEventListener(n,e=>{e.preventDefault()}));
+$('#drop').addEventListener('drop',e=>{e.preventDefault();addFiles(e.dataTransfer.files)});
+
+function renderScenes(){
+ const el=$('#scenes');el.innerHTML='';
+ S.scenes.forEach(s=>{
+   const d=document.createElement('div');d.className='item';
+   d.innerHTML=`<div class="row">
+     <input type="checkbox" ${s.selected?'checked':''}>
+     <div class="grow">
+       <strong>${esc(s.title)}</strong>
+       <small>${s.width} × ${s.height}</small>
+       <label style="margin-top:7px">Display name
+         <input class="sceneDisplayName" type="text" value="${esc(s.displayName || s.title)}" placeholder="e.g. Reception">
+       </label>
+     </div>
+     <button class="previewSceneBtn" type="button">Preview</button>
+   </div>`;
+   const cb=d.querySelector('input[type=checkbox]');cb.addEventListener('change',()=>s.selected=cb.checked);
+   const nameInput=d.querySelector('.sceneDisplayName');
+   nameInput.addEventListener('input',()=>{s.displayName=nameInput.value.trim() || s.title;});
+   d.querySelector('.previewSceneBtn').addEventListener('click',()=>preview(s));
+   el.appendChild(d);
+ });
+}
+function renderProjects(){
+ const el=$('#projects');el.innerHTML='';
+ S.projects.forEach(p=>{
+   const scenes=p.ids.map(id=>S.scenes.find(s=>s.id===id)).filter(Boolean);
+   const d=document.createElement('div');d.className='item';
+   const options=scenes.map(s=>`<option value="${s.id}" ${p.defaultSceneId===s.id?'selected':''}>${esc(s.displayName || s.title)}</option>`).join('');
+   d.innerHTML=`<strong>${esc(p.name)}</strong>
+   <small>/${esc(p.slug)}/ · ${p.ids.length} bubble(s)</small>
+   <label style="margin-top:8px">Default opening bubble
+     <select class="defaultSceneSelect">${options}</select>
+   </label>
+   <div class="row" style="margin-top:7px">
+     <button class="grow previewProjectBtn" type="button">Preview whole project</button>
+     <button class="removeProjectBtn" type="button">Remove</button>
+   </div>`;
+   d.querySelector('.defaultSceneSelect').addEventListener('change',e=>{p.defaultSceneId=e.target.value;});
+   d.querySelector('.previewProjectBtn').addEventListener('click',()=>previewProject(p));
+   d.querySelector('.removeProjectBtn').addEventListener('click',()=>{
+     S.projects=S.projects.filter(x=>x.id!==p.id);
+     const bar=$('#projectPreviewBar');
+     if(bar.dataset.projectId===p.id){ closeProjectPreview(); }
+     renderProjects();
+   });
+   el.appendChild(d);
+ });
+ $('#export').disabled=!S.projects.length;
+}
+$('#makeProject').addEventListener('click',()=>{
+ const ids=S.scenes.filter(s=>s.selected).map(s=>s.id);if(!ids.length)return alert('Select at least one scene.');
+ const name=$('#projectName').value.trim()||`Project ${S.projects.length+1}`,slug=slugify($('#slug').value||name);
+ if(S.projects.some(p=>p.slug===slug))return alert('Use a different project slug.');
+ S.projects.push({id:crypto.randomUUID(),name,slug,ids,defaultSceneId:ids[0]});S.scenes.forEach(s=>s.selected=false);renderScenes();renderProjects();
+ $('#projectName').value='';$('#slug').value='';delete $('#slug').dataset.touched;
+});
+
+/* Pure WebGL equirectangular viewer */
+function createViewer(canvas,imgURL){
+ const gl=canvas.getContext('webgl',{antialias:true})||canvas.getContext('experimental-webgl');
+ if(!gl)throw Error('WebGL is not supported in this browser.');
+ const vs=`attribute vec2 p;varying vec2 uv;void main(){uv=(p+1.0)*0.5;gl_Position=vec4(p,0.0,1.0);}`;
+ const fs=`precision highp float;varying vec2 uv;uniform sampler2D tex;uniform vec2 res;uniform float yaw,pitch,fov;
+ const float PI=3.141592653589793;
+ void main(){
+   vec2 q=(gl_FragCoord.xy/res-0.5)*2.0;q.x*=res.x/res.y;
+   float z=1.0/tan(fov*0.5);vec3 d=normalize(vec3(q.x,q.y,z));
+   float cp=cos(pitch),sp=sin(pitch);d=vec3(d.x,cp*d.y-sp*d.z,sp*d.y+cp*d.z);
+   float cy=cos(yaw),sy=sin(yaw);d=vec3(cy*d.x+sy*d.z,d.y,-sy*d.x+cy*d.z);
+   float lon=atan(d.x,d.z),lat=asin(clamp(d.y,-1.0,1.0));
+   vec2 t=vec2(0.5+lon/(2.0*PI),0.5-lat/PI);
+   gl_FragColor=texture2D(tex,t);
+ }`;
+ function shader(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s}
+ const pr=gl.createProgram();gl.attachShader(pr,shader(gl.VERTEX_SHADER,vs));gl.attachShader(pr,shader(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);gl.useProgram(pr);
+ const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
+ const pa=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(pa);gl.vertexAttribPointer(pa,2,gl.FLOAT,false,0,0);
+ const loc={res:gl.getUniformLocation(pr,'res'),yaw:gl.getUniformLocation(pr,'yaw'),pitch:gl.getUniformLocation(pr,'pitch'),fov:gl.getUniformLocation(pr,'fov')};
+ const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+ let yaw=0,pitch=0,fov=75*Math.PI/180,drag=false,lx=0,ly=0,raf=0,dead=false;
+ const img=new Image();img.onload=()=>{gl.bindTexture(gl.TEXTURE_2D,tex);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,0);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);draw()};img.src=imgURL;
+ function size(){const r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2),w=Math.max(2,Math.round(r.width*d)),h=Math.max(2,Math.round(r.height*d));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h)}}
+ function draw(){if(dead)return;size();gl.uniform2f(loc.res,canvas.width,canvas.height);gl.uniform1f(loc.yaw,yaw);gl.uniform1f(loc.pitch,pitch);gl.uniform1f(loc.fov,fov);gl.drawArrays(gl.TRIANGLES,0,6);raf=requestAnimationFrame(draw)}
+ const down=e=>{drag=true;lx=e.clientX;ly=e.clientY;canvas.setPointerCapture?.(e.pointerId)};
+ const move=e=>{if(!drag)return;yaw-=(e.clientX-lx)*.005;pitch+=(e.clientY-ly)*.005;pitch=Math.max(-1.5,Math.min(1.5,pitch));lx=e.clientX;ly=e.clientY};
+ const up=()=>drag=false;
+ const wheel=e=>{e.preventDefault();fov+=e.deltaY*.001;fov=Math.max(.45,Math.min(1.9,fov))};
+ canvas.addEventListener('pointerdown',down);canvas.addEventListener('pointermove',move);window.addEventListener('pointerup',up);canvas.addEventListener('wheel',wheel,{passive:false});
+ return {destroy(){dead=true;cancelAnimationFrame(raf);canvas.removeEventListener('pointerdown',down);canvas.removeEventListener('pointermove',move);canvas.removeEventListener('wheel',wheel);window.removeEventListener('pointerup',up)}};
+}
+function preview(s){
+ const dbg=document.getElementById('debugPanel');
+ if(dbg) dbg.textContent='Preview: loading '+s.width+' × '+s.height+' panorama…';
+
+ const test=new Image();
+ test.onload=()=>{
+   if(dbg) dbg.textContent='Image texture loaded ✓ · '+test.naturalWidth+' × '+test.naturalHeight+' · starting 360 viewer…';
+   try{
+     if(S.preview)S.preview.destroy();
+     $('#empty').style.display='none';
+     $('#previewTitle').textContent=s.title;
+     S.preview=createViewer($('#previewCanvas'),s.url);
+     if(dbg) setTimeout(()=>dbg.textContent='Image texture loaded ✓ · 360 viewer started ✓ · Drag inside the image to look around.',500);
+   }catch(e){
+     if(dbg) dbg.textContent='VIEWER ERROR: '+e.message;
+     alert('360 viewer error: '+e.message);
+   }
+ };
+ test.onerror=()=>{
+   if(dbg) dbg.textContent='IMAGE ERROR: TIFF decoded, but browser could not read the preview image.';
+ };
+ test.src=s.url;
+}
+$('#clear').addEventListener('click',()=>{if(!confirm('Clear everything?'))return;S.scenes.forEach(s=>URL.revokeObjectURL(s.url));S.scenes=[];S.projects=[];if(S.preview)S.preview.destroy();S.preview=null;$('#empty').style.display='grid';renderScenes();renderProjects();$('#status').textContent='No files loaded.'});
+
+function exportedHTML(p, scenes, filenames){
+ const data=scenes.map((s,i)=>({title:(s.displayName || s.title),file:'images/'+filenames[i],thumb:'images/'+filenames[i],id:s.id}));
+ const defaultIndex=Math.max(0,scenes.findIndex(s=>s.id===project.defaultSceneId));
+ return `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(p.name)}</title>
+<style>
+html,body{width:100%;height:100%;margin:0;background:#000;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Arial}
+canvas{width:100%;height:100%;display:block;cursor:grab}canvas:active{cursor:grabbing}
+#menu{position:fixed;left:16px;right:16px;bottom:16px;z-index:2;display:flex;flex-wrap:wrap;gap:8px;padding:8px;border-radius:12px;background:rgba(0,0,0,.50);backdrop-filter:blur(8px);max-height:230px;overflow:auto;align-items:flex-start}
+#menu button{position:relative;border:1px solid rgba(255,255,255,.18);border-radius:9px;background:#111;padding:0;overflow:hidden;cursor:pointer;width:150px;height:90px;flex:0 0 150px}
+#menu button img{width:150px;height:90px;display:block;object-fit:cover}
+#menu button span{position:absolute;left:0;right:0;bottom:0;padding:7px 8px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.82));font:12px system-ui;text-align:left}
+#menu button.active{outline:2px solid #fff}
+#tip{position:fixed;top:14px;left:50%;transform:translateX(-50%);color:white;background:rgba(0,0,0,.45);padding:7px 10px;border-radius:8px;font-size:13px;pointer-events:none}
+</style></head><body><canvas id="v"></canvas><div id="menu"></div><div id="tip">Drag to look around · wheel to zoom</div>
+<script>
+const scenes=${JSON.stringify(data)};
+const canvas=document.getElementById('v'),menu=document.getElementById('menu');let V=null;
+function viewer(url){
+ const gl=canvas.getContext('webgl',{antialias:true});if(!gl){alert('WebGL is required');return null}
+ const vs='attribute vec2 p;varying vec2 uv;void main(){uv=(p+1.0)*0.5;gl_Position=vec4(p,0.0,1.0);}';
+ const fs='precision highp float;varying vec2 uv;uniform sampler2D tex;uniform vec2 res;uniform float yaw,pitch,fov;const float PI=3.141592653589793;void main(){vec2 q=(gl_FragCoord.xy/res-0.5)*2.0;q.x*=res.x/res.y;float z=1.0/tan(fov*0.5);vec3 d=normalize(vec3(q.x,q.y,z));float cp=cos(pitch),sp=sin(pitch);d=vec3(d.x,cp*d.y-sp*d.z,sp*d.y+cp*d.z);float cy=cos(yaw),sy=sin(yaw);d=vec3(cy*d.x+sy*d.z,d.y,-sy*d.x+cy*d.z);float lon=atan(d.x,d.z),lat=asin(clamp(d.y,-1.0,1.0));vec2 t=vec2(0.5+lon/(2.0*PI),0.5-lat/PI);gl_FragColor=texture2D(tex,t);}';
+ function sh(t,s){let o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o}
+ let pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,vs));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);gl.useProgram(pr);
+ let b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);let a=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
+ let L={res:gl.getUniformLocation(pr,'res'),yaw:gl.getUniformLocation(pr,'yaw'),pitch:gl.getUniformLocation(pr,'pitch'),fov:gl.getUniformLocation(pr,'fov')},t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+ let yaw=0,pitch=0,fov=1.309,drag=false,lx=0,ly=0,dead=false,raf=0,img=new Image();img.onload=()=>{gl.bindTexture(gl.TEXTURE_2D,t);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);draw()};img.src=url;
+ function draw(){if(dead)return;let r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2),w=Math.round(r.width*d),h=Math.round(r.height*d);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h)}gl.uniform2f(L.res,w,h);gl.uniform1f(L.yaw,yaw);gl.uniform1f(L.pitch,pitch);gl.uniform1f(L.fov,fov);gl.drawArrays(gl.TRIANGLES,0,6);raf=requestAnimationFrame(draw)}
+ const dn=e=>{drag=true;lx=e.clientX;ly=e.clientY},mv=e=>{if(!drag)return;yaw-=(e.clientX-lx)*.005;pitch+=(e.clientY-ly)*.005;pitch=Math.max(-1.5,Math.min(1.5,pitch));lx=e.clientX;ly=e.clientY},up=()=>drag=false,wh=e=>{e.preventDefault();fov=Math.max(.45,Math.min(1.9,fov+e.deltaY*.001))};
+ canvas.addEventListener('pointerdown',dn);canvas.addEventListener('pointermove',mv);window.addEventListener('pointerup',up);canvas.addEventListener('wheel',wh,{passive:false});
+ return{destroy(){dead=true;cancelAnimationFrame(raf);canvas.removeEventListener('pointerdown',dn);canvas.removeEventListener('pointermove',mv);window.removeEventListener('pointerup',up);canvas.removeEventListener('wheel',wh)}}
+}
+function load(i){if(V)V.destroy();V=viewer(scenes[i].file)}
+function setActiveExport(i){
+  [...menu.querySelectorAll('button')].forEach((b,idx)=>b.classList.toggle('active',idx===i));
+}
+scenes.forEach((s,i)=>{
+  let b=document.createElement('button');
+  let img=document.createElement('img');img.src=s.thumb;img.alt=s.title+' thumbnail';
+  let label=document.createElement('span');label.textContent=s.title;
+  b.appendChild(img);b.appendChild(label);
+  b.addEventListener('click',()=>{load(i);setActiveExport(i)});
+  menu.appendChild(b);
+});
+if(scenes.length<2)menu.style.display='none';load(0);setActiveExport(0);setTimeout(()=>document.getElementById('tip').style.display='none',3500);
+<\/script></body></html>`;
+}
+
+function previewProject(project){
+  const scenes=project.ids.map(id=>S.scenes.find(s=>s.id===id)).filter(Boolean);
+  if(!scenes.length){
+    alert('This project has no available scenes.');
+    return;
+  }
+
+  const bar=$('#projectPreviewBar');
+  bar.style.display='block';
+  bar.dataset.projectId=project.id;
+  $('#projectPreviewName').textContent=project.name+' — '+scenes.length+' bubble(s)';
+
+  const buttons=$('#projectSceneButtons');
+  buttons.innerHTML='';
+
+  scenes.forEach((scene,index)=>{
+    const b=document.createElement('button');
+    b.type='button';
+    b.className='thumb-btn';
+    b.dataset.sceneId=scene.id;
+
+    const img=document.createElement('img');
+    img.src=scene.url;
+    img.alt=(scene.displayName || scene.title)+' thumbnail';
+
+    const label=document.createElement('span');
+    label.textContent=scene.displayName || scene.title;
+
+    b.appendChild(img);
+    b.appendChild(label);
+    b.addEventListener('click',()=>{
+      preview(scene);
+      setActiveProjectScene(scene.id);
+    });
+    buttons.appendChild(b);
+  });
+
+  const openingScene=scenes.find(s=>s.id===project.defaultSceneId) || scenes[0];
+  preview(openingScene);
+  setActiveProjectScene(openingScene.id);
+
+  // Scroll the preview area into view so the user immediately sees the final-like tour.
+  $('#previewWrap').scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+function setActiveProjectScene(sceneId){
+  document.querySelectorAll('#projectSceneButtons .thumb-btn').forEach(b=>{
+    b.classList.toggle('active', b.dataset.sceneId===sceneId);
+  });
+}
+
+function closeProjectPreview(){
+  const bar=$('#projectPreviewBar');
+  bar.style.display='none';
+  bar.dataset.projectId='';
+  $('#projectSceneButtons').innerHTML='';
+  $('#projectPreviewName').textContent='Project Preview';
+}
+
+$('#closeProjectPreview').addEventListener('click',closeProjectPreview);
+
+$('#export').addEventListener('click',async()=>{
+ const zip=new JSZip();$('#export').disabled=true;$('#export').textContent='Building…';
+ try{
+  for(let pi=0;pi<S.projects.length;pi++){
+   const p=S.projects[pi],folder=zip.folder(p.slug),scenes=p.ids.map(id=>S.scenes.find(s=>s.id===id)).filter(Boolean),names=[],used=new Set();
+   scenes.forEach(s=>{let base=slugify(s.title),n=base+'.jpg',k=2;while(used.has(n))n=base+'-'+k++ +'.jpg';used.add(n);names.push(n)});
+   folder.file('index.html',exportedHTML(p,scenes,names));const imgs=folder.folder('images');scenes.forEach((s,i)=>imgs.file(names[i],s.blob));
+  }
+  zip.file('README.txt','Open each project folder/index.html. Drag to look around and use the mouse wheel to zoom. Upload the same folders to GitHub Pages for public links.');
+  const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}},m=>progress(m.percent,'Compressing '+Math.round(m.percent)+'%'));
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='360-project-websites-v2.zip';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),30000);progress(100,'ZIP ready.');
+ }catch(e){alert('Export failed: '+e.message)}
+ finally{$('#export').disabled=false;$('#export').textContent='Export project websites (.zip)';setTimeout(()=>$('#bar').style.width='0%',600)}
+});
+</script>
+</body>
+</html>
