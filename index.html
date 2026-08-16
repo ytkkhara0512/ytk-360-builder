@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>360 Portfolio Builder v2.9 — Export Fix 2</title>
+<title>360 Portfolio Builder v3.0 — Automatic 8K TIFF → 4K JPG</title>
 <style>
 :root{--bg:#0c0e11;--panel:#15181d;--panel2:#1d2127;--line:#2b3038;--text:#f3f5f7;--muted:#a5acb7;--accent:#6aaeff}
 *{box-sizing:border-box}
@@ -42,8 +42,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
 </head>
 <body>
 <header>
-<h1>360 Portfolio Builder v2.3 — Project Preview</h1>
-<p>TIFF/JPG/PNG → interactive 360° scenes → preview whole projects → separate project websites.</p>
+<h1>360 Portfolio Builder v3.0 — Automatic TIFF Optimisation</h1>
+<p>Upload original 8K TIFF/JPG/PNG → automatically create 4K website-ready JPG panoramas → preview → export project websites.</p>
 </header>
 <main>
 <section class="panel stack">
@@ -51,18 +51,19 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <input id="files" type="file" multiple accept=".tif,.tiff,.jpg,.jpeg,.png">
   </label>
   <div id="drop" class="drop">Drag TIFF / JPG / PNG panoramas here</div>
-  <div class="hint">Use 2:1 equirectangular images such as 8192 × 4096.</div>
+  <div class="hint"><strong>Recommended workflow:</strong> upload your original 8192 × 4096 TIFF files directly. The builder processes them locally in your browser and creates 4096 × 2048 JPG textures for the website.</div>
 
-  <label>Export width
+  <label>Website panorama width
     <select id="maxWidth">
-      <option value="8192" selected>8192 px</option>
-      <option value="6144">6144 px</option>
-      <option value="4096">4096 px</option>
+      <option value="4096" selected>4096 px — Recommended website size</option>
+      <option value="6144">6144 px — Higher detail / heavier</option>
+      <option value="8192">8192 px — Original size / very heavy</option>
     </select>
   </label>
   <label>JPEG quality
     <input id="quality" type="number" min=".5" max="1" step=".05" value=".9">
   </label>
+  <div class="hint">Default 0.90 = high-quality JPG with much smaller file size than the original TIFF.</div>
   <div id="status" class="hint">No files loaded.</div>
   <div class="progress"><div id="bar"></div></div>
 
@@ -79,7 +80,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 
   <div><strong>Projects</strong><div id="projects" class="list" style="margin-top:8px"></div></div>
   <button id="export" class="primary" disabled>Export project websites (.zip)</button>
-  <div class="hint">Each project gets its own folder and <code>index.html</code>. The exported viewer is pure WebGL and does not need Pannellum or krpano.</div>
+  <div class="hint">Each project gets its own folder, <code>index.html</code> and optimized JPG panoramas. Your original TIFF files are not included in the exported ZIP.</div>
 </section>
 
 <section>
@@ -188,7 +189,7 @@ async function addFiles(files){
    try{S.scenes.push(await decodeFile(a[i]))}catch(e){alert(a[i].name+': '+e.message)}
    renderScenes(); await new Promise(r=>setTimeout(r,10));
  }
- progress(100,`${S.scenes.length} panorama(s) ready.`);setTimeout(()=>$('#bar').style.width='0%',500);
+ progress(100,`${S.scenes.length} panorama(s) ready — website JPGs generated at up to ${$('#maxWidth').value}px wide.`);setTimeout(()=>$('#bar').style.width='0%',500);
  if(S.scenes.length&&!S.preview)preview(S.scenes[0]);
 }
 $('#files').addEventListener('change',e=>addFiles(e.target.files));
@@ -203,7 +204,7 @@ function renderScenes(){
      <input type="checkbox" ${s.selected?'checked':''}>
      <div class="grow">
        <strong>${esc(s.title)}</strong>
-       <small>${s.width} × ${s.height}</small>
+       <small>Original ${s.originalWidth} × ${s.originalHeight} → Website ${s.width} × ${s.height} JPG</small>
        <label style="margin-top:7px">Display name
          <input class="sceneDisplayName" type="text" value="${esc(s.displayName || s.title)}" placeholder="e.g. Reception">
        </label>
