@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>360 Portfolio Builder v3.1 — 8K TIFF → 4K JPG + WebGL Cleanup</title>
+<title>360 Portfolio Builder v3.2 — Persistent WebGL Viewer</title>
 <style>
 :root{--bg:#0c0e11;--panel:#15181d;--panel2:#1d2127;--line:#2b3038;--text:#f3f5f7;--muted:#a5acb7;--accent:#6aaeff}
 *{box-sizing:border-box}
@@ -42,7 +42,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 </head>
 <body>
 <header>
-<h1>360 Portfolio Builder v3.1 — Automatic TIFF Optimisation</h1>
+<h1>360 Portfolio Builder v3.2 — Automatic TIFF Optimisation</h1>
 <p>Upload original 8K TIFF/JPG/PNG → automatically create 4K website-ready JPG panoramas → preview → export project websites.</p>
 </header>
 <main>
@@ -254,9 +254,9 @@ $('#makeProject').addEventListener('click',()=>{
 });
 
 /* Pure WebGL equirectangular viewer */
-function createViewer(canvas,imgURL){
+function createViewer(canvas){
  const gl=canvas.getContext('webgl',{antialias:true,preserveDrawingBuffer:false})||canvas.getContext('experimental-webgl',{antialias:true});
- if(!gl)throw Error('WebGL context could not be created. Close other 360/WebGL tabs, refresh this page, and try again.');
+ if(!gl)throw Error('WebGL context could not be created. Please make sure Chrome hardware acceleration is enabled, then refresh.');
  const vs=`attribute vec2 p;varying vec2 uv;void main(){uv=(p+1.0)*0.5;gl_Position=vec4(p,0.0,1.0);}`;
  const fs=`precision highp float;varying vec2 uv;uniform sampler2D tex;uniform vec2 res;uniform float yaw,pitch,fov;
  const float PI=3.141592653589793;
@@ -270,12 +270,8 @@ function createViewer(canvas,imgURL){
    gl_FragColor=texture2D(tex,t);
  }`;
  function shader(type,source){
-   const sh=gl.createShader(type);
-   gl.shaderSource(sh,source);gl.compileShader(sh);
-   if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)){
-     const msg=gl.getShaderInfoLog(sh)||'Shader compile failed';
-     gl.deleteShader(sh);throw Error(msg);
-   }
+   const sh=gl.createShader(type);gl.shaderSource(sh,source);gl.compileShader(sh);
+   if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(sh)||'Shader compile failed');
    return sh;
  }
  const vsh=shader(gl.VERTEX_SHADER,vs),fsh=shader(gl.FRAGMENT_SHADER,fs);
@@ -283,94 +279,81 @@ function createViewer(canvas,imgURL){
  if(!gl.getProgramParameter(pr,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(pr)||'WebGL program link failed');
  gl.useProgram(pr);
 
- const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
+ const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);
+ gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
  const pa=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(pa);gl.vertexAttribPointer(pa,2,gl.FLOAT,false,0,0);
- const loc={res:gl.getUniformLocation(pr,'res'),yaw:gl.getUniformLocation(pr,'yaw'),pitch:gl.getUniformLocation(pr,'pitch'),fov:gl.getUniformLocation(pr,'fov')};
 
+ const loc={res:gl.getUniformLocation(pr,'res'),yaw:gl.getUniformLocation(pr,'yaw'),pitch:gl.getUniformLocation(pr,'pitch'),fov:gl.getUniformLocation(pr,'fov')};
  const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
 
- let yaw=0,pitch=0,fov=75*Math.PI/180,drag=false,lx=0,ly=0,raf=0,dead=false;
- const img=new Image();
- img.onload=()=>{
-   if(dead)return;
-   gl.bindTexture(gl.TEXTURE_2D,tex);
-   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,0);
-   gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);
-   draw();
- };
- img.onerror=()=>{ if(!dead) console.error('Panorama image failed to load:',imgURL); };
- img.src=imgURL;
+ let yaw=0,pitch=0,fov=75*Math.PI/180,drag=false,lx=0,ly=0,raf=0,dead=false,currentImg=null,loadToken=0;
 
  function size(){
-   const r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2),
-   w=Math.max(2,Math.round(r.width*d)),h=Math.max(2,Math.round(r.height*d));
+   const r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);
+   const w=Math.max(2,Math.round(r.width*d)),h=Math.max(2,Math.round(r.height*d));
    if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h)}
  }
  function draw(){
    if(dead||gl.isContextLost())return;
-   size();gl.uniform2f(loc.res,canvas.width,canvas.height);gl.uniform1f(loc.yaw,yaw);gl.uniform1f(loc.pitch,pitch);gl.uniform1f(loc.fov,fov);
+   size();gl.uniform2f(loc.res,canvas.width,canvas.height);
+   gl.uniform1f(loc.yaw,yaw);gl.uniform1f(loc.pitch,pitch);gl.uniform1f(loc.fov,fov);
    gl.drawArrays(gl.TRIANGLES,0,6);raf=requestAnimationFrame(draw);
+ }
+ function setImage(url,onReady,onError){
+   const token=++loadToken;
+   const img=new Image();
+   img.onload=()=>{
+     if(dead||token!==loadToken)return;
+     currentImg=img;gl.bindTexture(gl.TEXTURE_2D,tex);
+     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,0);
+     gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);
+     yaw=0;pitch=0;
+     if(!raf)draw();
+     onReady?.(img);
+   };
+   img.onerror=()=>{if(token===loadToken)onError?.();};
+   img.src=url;
  }
  const down=e=>{drag=true;lx=e.clientX;ly=e.clientY;canvas.setPointerCapture?.(e.pointerId)};
  const move=e=>{if(!drag)return;yaw-=(e.clientX-lx)*.005;pitch+=(e.clientY-ly)*.005;pitch=Math.max(-1.5,Math.min(1.5,pitch));lx=e.clientX;ly=e.clientY};
  const up=()=>drag=false;
- const wheel=e=>{e.preventDefault();fov+=e.deltaY*.001;fov=Math.max(.45,Math.min(1.9,fov))};
+ const wheel=e=>{e.preventDefault();fov=Math.max(.45,Math.min(1.9,fov+e.deltaY*.001))};
  canvas.addEventListener('pointerdown',down);canvas.addEventListener('pointermove',move);window.addEventListener('pointerup',up);canvas.addEventListener('wheel',wheel,{passive:false});
 
- return {destroy(){
-   if(dead)return;
-   dead=true;cancelAnimationFrame(raf);
-   img.onload=null;img.onerror=null;
+ return {setImage,destroy(){
+   dead=true;cancelAnimationFrame(raf);loadToken++;
    canvas.removeEventListener('pointerdown',down);canvas.removeEventListener('pointermove',move);canvas.removeEventListener('wheel',wheel);window.removeEventListener('pointerup',up);
-   try{
-     gl.bindTexture(gl.TEXTURE_2D,null);gl.deleteTexture(tex);
-     gl.bindBuffer(gl.ARRAY_BUFFER,null);gl.deleteBuffer(b);
-     gl.useProgram(null);gl.deleteProgram(pr);gl.deleteShader(vsh);gl.deleteShader(fsh);
-     const lose=gl.getExtension('WEBGL_lose_context');if(lose)lose.loseContext();
-   }catch(_){}
  }};
 }
-let previewGeneration=0;
+
+function ensurePreviewViewer(){
+ if(S.preview)return S.preview;
+ S.preview=createViewer($('#previewCanvas'));
+ return S.preview;
+}
+
 function preview(s){
- const generation=++previewGeneration;
  const dbg=document.getElementById('debugPanel');
  if(dbg) dbg.textContent='Preview: loading '+s.width+' × '+s.height+' panorama…';
-
- const test=new Image();
- test.onload=()=>{
-   if(generation!==previewGeneration)return;
-   if(dbg) dbg.textContent='Image texture loaded ✓ · '+test.naturalWidth+' × '+test.naturalHeight+' · starting 360 viewer…';
-   try{
-     if(S.preview){S.preview.destroy();S.preview=null;}
-     $('#empty').style.display='none';
-     $('#previewTitle').textContent=s.title;
-     // Give Chrome a moment to release the previous WebGL context.
-     setTimeout(()=>{
-       if(generation!==previewGeneration)return;
-       try{
-         S.preview=createViewer($('#previewCanvas'),s.url);
-         if(dbg) dbg.textContent='Image texture loaded ✓ · 360 viewer started ✓ · Drag inside the image to look around.';
-       }catch(e){
-         if(dbg) dbg.textContent='VIEWER ERROR: '+e.message;
-         alert('360 viewer error: '+e.message);
-       }
-     },80);
-   }catch(e){
-     if(dbg) dbg.textContent='VIEWER ERROR: '+e.message;
-     alert('360 viewer error: '+e.message);
-   }
- };
- test.onerror=()=>{
-   if(generation!==previewGeneration)return;
-   if(dbg) dbg.textContent='IMAGE ERROR: panorama JPG could not be read by the browser.';
- };
- test.src=s.url;
+ $('#empty').style.display='none';
+ $('#previewTitle').textContent=s.title;
+ try{
+   const viewer=ensurePreviewViewer();
+   viewer.setImage(
+     s.url,
+     img=>{if(dbg)dbg.textContent='Image texture loaded ✓ · '+img.naturalWidth+' × '+img.naturalHeight+' · 360 viewer ready ✓ · Drag inside the image to look around.';},
+     ()=>{if(dbg)dbg.textContent='IMAGE ERROR: panorama JPG could not be read by the browser.';}
+   );
+ }catch(e){
+   if(dbg)dbg.textContent='VIEWER ERROR: '+e.message;
+   alert('360 viewer error: '+e.message);
+ }
 }
-$('#clear').addEventListener('click',()=>{if(!confirm('Clear everything?'))return;S.scenes.forEach(s=>URL.revokeObjectURL(s.url));S.scenes=[];S.projects=[];if(S.preview)S.preview.destroy();S.preview=null;$('#empty').style.display='grid';renderScenes();renderProjects();$('#status').textContent='No files loaded.'});
+$('#clear').addEventListener('click',()=>{if(!confirm('Clear everything?'))return;S.scenes.forEach(s=>URL.revokeObjectURL(s.url));S.scenes=[];S.projects=[];if(S.preview){S.preview.destroy();S.preview=null;}$('#empty').style.display='grid';renderScenes();renderProjects();$('#status').textContent='No files loaded.'});
 
 function exportedHTML(p, scenes, filenames){
  const data=scenes.map((s,i)=>({title:(s.displayName || s.title),file:'images/'+filenames[i],thumb:'images/'+filenames[i],id:s.id}));
@@ -389,22 +372,32 @@ canvas{width:100%;height:100%;display:block;cursor:grab}canvas:active{cursor:gra
 </style></head><body><canvas id="v"></canvas><div id="menu"></div><div id="tip">Drag to look around · wheel to zoom</div>
 <script>
 const scenes=${JSON.stringify(data)};
-const canvas=document.getElementById('v'),menu=document.getElementById('menu');let V=null;
-function viewer(url){
- const gl=canvas.getContext('webgl',{antialias:true});if(!gl){alert('WebGL is required');return null}
+const canvas=document.getElementById('v'),menu=document.getElementById('menu');
+function viewer(){
+ const gl=canvas.getContext('webgl',{antialias:true,preserveDrawingBuffer:false})||canvas.getContext('experimental-webgl',{antialias:true});
+ if(!gl){alert('WebGL is required');return null}
  const vs='attribute vec2 p;varying vec2 uv;void main(){uv=(p+1.0)*0.5;gl_Position=vec4(p,0.0,1.0);}';
  const fs='precision highp float;varying vec2 uv;uniform sampler2D tex;uniform vec2 res;uniform float yaw,pitch,fov;const float PI=3.141592653589793;void main(){vec2 q=(gl_FragCoord.xy/res-0.5)*2.0;q.x*=res.x/res.y;float z=1.0/tan(fov*0.5);vec3 d=normalize(vec3(q.x,q.y,z));float cp=cos(pitch),sp=sin(pitch);d=vec3(d.x,cp*d.y-sp*d.z,sp*d.y+cp*d.z);float cy=cos(yaw),sy=sin(yaw);d=vec3(cy*d.x+sy*d.z,d.y,-sy*d.x+cy*d.z);float lon=atan(d.x,d.z),lat=asin(clamp(d.y,-1.0,1.0));vec2 t=vec2(0.5+lon/(2.0*PI),0.5-lat/PI);gl_FragColor=texture2D(tex,t);}';
  function sh(t,s){let o=gl.createShader(t);gl.shaderSource(o,s);gl.compileShader(o);return o}
  let pr=gl.createProgram();gl.attachShader(pr,sh(gl.VERTEX_SHADER,vs));gl.attachShader(pr,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(pr);gl.useProgram(pr);
- let b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);let a=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
- let L={res:gl.getUniformLocation(pr,'res'),yaw:gl.getUniformLocation(pr,'yaw'),pitch:gl.getUniformLocation(pr,'pitch'),fov:gl.getUniformLocation(pr,'fov')},t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
- let yaw=0,pitch=0,fov=1.309,drag=false,lx=0,ly=0,dead=false,raf=0,img=new Image();img.onload=()=>{gl.bindTexture(gl.TEXTURE_2D,t);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);draw()};img.src=url;
- function draw(){if(dead)return;let r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2),w=Math.round(r.width*d),h=Math.round(r.height*d);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h)}gl.uniform2f(L.res,w,h);gl.uniform1f(L.yaw,yaw);gl.uniform1f(L.pitch,pitch);gl.uniform1f(L.fov,fov);gl.drawArrays(gl.TRIANGLES,0,6);raf=requestAnimationFrame(draw)}
+ let b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
+ let a=gl.getAttribLocation(pr,'p');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
+ let L={res:gl.getUniformLocation(pr,'res'),yaw:gl.getUniformLocation(pr,'yaw'),pitch:gl.getUniformLocation(pr,'pitch'),fov:gl.getUniformLocation(pr,'fov')};
+ let t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+ let yaw=0,pitch=0,fov=1.309,drag=false,lx=0,ly=0,dead=false,raf=0,token=0;
+
+ function setImage(url){
+   const my=++token,img=new Image();
+   img.onload=()=>{if(dead||my!==token)return;gl.bindTexture(gl.TEXTURE_2D,t);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,0);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);yaw=0;pitch=0;if(!raf)draw()};
+   img.src=url;
+ }
+ function draw(){if(dead||gl.isContextLost())return;let r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2),w=Math.max(2,Math.round(r.width*d)),h=Math.max(2,Math.round(r.height*d));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h)}gl.uniform2f(L.res,w,h);gl.uniform1f(L.yaw,yaw);gl.uniform1f(L.pitch,pitch);gl.uniform1f(L.fov,fov);gl.drawArrays(gl.TRIANGLES,0,6);raf=requestAnimationFrame(draw)}
  const dn=e=>{drag=true;lx=e.clientX;ly=e.clientY},mv=e=>{if(!drag)return;yaw-=(e.clientX-lx)*.005;pitch+=(e.clientY-ly)*.005;pitch=Math.max(-1.5,Math.min(1.5,pitch));lx=e.clientX;ly=e.clientY},up=()=>drag=false,wh=e=>{e.preventDefault();fov=Math.max(.45,Math.min(1.9,fov+e.deltaY*.001))};
  canvas.addEventListener('pointerdown',dn);canvas.addEventListener('pointermove',mv);window.addEventListener('pointerup',up);canvas.addEventListener('wheel',wh,{passive:false});
- return{destroy(){if(dead)return;dead=true;cancelAnimationFrame(raf);img.onload=null;canvas.removeEventListener('pointerdown',dn);canvas.removeEventListener('pointermove',mv);window.removeEventListener('pointerup',up);canvas.removeEventListener('wheel',wh);try{gl.bindTexture(gl.TEXTURE_2D,null);gl.deleteTexture(t);gl.bindBuffer(gl.ARRAY_BUFFER,null);gl.deleteBuffer(b);gl.useProgram(null);gl.deleteProgram(pr);const lose=gl.getExtension('WEBGL_lose_context');if(lose)lose.loseContext()}catch(_){}}}
+ return{setImage}
 }
-function load(i){if(V){V.destroy();V=null}setTimeout(()=>{V=viewer(scenes[i].file)},80)}
+const V=viewer();
+function load(i){if(V)V.setImage(scenes[i].file)}
 function setActiveExport(i){
   [...menu.querySelectorAll('button')].forEach((b,idx)=>b.classList.toggle('active',idx===i));
 }
