@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>360 Portfolio Builder v2.8 — Export Fix</title>
+<title>360 Portfolio Builder v2.9 — Export Fix 2</title>
 <style>
 :root{--bg:#0c0e11;--panel:#15181d;--panel2:#1d2127;--line:#2b3038;--text:#f3f5f7;--muted:#a5acb7;--accent:#6aaeff}
 *{box-sizing:border-box}
@@ -312,7 +312,7 @@ $('#clear').addEventListener('click',()=>{if(!confirm('Clear everything?'))retur
 
 function exportedHTML(p, scenes, filenames){
  const data=scenes.map((s,i)=>({title:(s.displayName || s.title),file:'images/'+filenames[i],thumb:'images/'+filenames[i],id:s.id}));
- const defaultIndex=Math.max(0,scenes.findIndex(s=>s.id===project.defaultSceneId));
+ const defaultIndex=Math.max(0,scenes.findIndex(s=>s.id===p.defaultSceneId));
  return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(p.name)}</title>
 <style>
@@ -354,7 +354,7 @@ scenes.forEach((s,i)=>{
   b.addEventListener('click',()=>{load(i);setActiveExport(i)});
   menu.appendChild(b);
 });
-if(scenes.length<2)menu.style.display='none';load(0);setActiveExport(0);setTimeout(()=>document.getElementById('tip').style.display='none',3500);
+if(scenes.length<2)menu.style.display='none';load(${defaultIndex});setActiveExport(${defaultIndex});setTimeout(()=>document.getElementById('tip').style.display='none',3500);
 <\/script></body></html>`;
 }
 
