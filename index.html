@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>360 Portfolio Builder v3.2 — Persistent WebGL Viewer</title>
+<title>360 Portfolio Builder v3.4 — Single-row + Progressive Loading</title>
 <style>
 :root{--bg:#0c0e11;--panel:#15181d;--panel2:#1d2127;--line:#2b3038;--text:#f3f5f7;--muted:#a5acb7;--accent:#6aaeff}
 *{box-sizing:border-box}
@@ -32,7 +32,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px}
 .progress{height:7px;background:#242931;border-radius:99px;overflow:hidden}.progress div{height:100%;width:0;background:var(--accent)}
 
-.thumb-strip{display:flex;flex-wrap:wrap;gap:10px;width:100%;align-items:flex-start}
+.thumb-strip{display:flex;flex-wrap:nowrap;gap:10px;width:100%;align-items:flex-start;overflow-x:auto;overflow-y:hidden;padding-bottom:4px;scrollbar-width:thin}
 .thumb-btn{position:relative;padding:0;overflow:hidden;width:150px;height:90px;flex:0 0 150px;border-radius:10px;background:#0c0f13;border:1px solid var(--line);cursor:pointer}
 .thumb-btn img{display:block;width:150px;height:90px;object-fit:cover}
 .thumb-btn span{position:absolute;left:0;right:0;bottom:0;padding:6px 8px;background:linear-gradient(transparent,rgba(0,0,0,.78));color:#fff;text-align:left;font-size:11px}
@@ -42,8 +42,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
 </head>
 <body>
 <header>
-<h1>360 Portfolio Builder v3.3 — Mixed TIFF + JPG Support</h1>
-<p>Upload original 8K TIFF/JPG/PNG → automatically create 4K website-ready JPG panoramas → preview → export project websites. Already-optimised 4K JPG files can be mixed in and will be kept as-is.</p>
+<h1>360 Portfolio Builder v3.4 — Single-row + Progressive Loading</h1>
+<p>Upload original 8K TIFF/JPG/PNG → create 4K website panoramas → preview → export. v3.4 keeps already-optimised 4K JPGs as-is, uses a single-row thumbnail bar, and loads a lightweight preview first before the full-quality panorama.</p>
 </header>
 <main>
 <section class="panel stack">
@@ -122,6 +122,26 @@ async function blobToDataURL(blob){
   });
 }
 
+
+async function makeThumbFromCanvas(sourceCanvas){
+  const tw=Math.min(512,sourceCanvas.width);
+  const th=Math.max(1,Math.round(sourceCanvas.height*tw/sourceCanvas.width));
+  const c=document.createElement('canvas');
+  c.width=tw;c.height=th;
+  const cx=c.getContext('2d',{alpha:false});
+  cx.imageSmoothingEnabled=true;
+  cx.imageSmoothingQuality='high';
+  cx.drawImage(sourceCanvas,0,0,tw,th);
+  const url=c.toDataURL('image/jpeg',.62);
+  let blob=await new Promise(resolve=>c.toBlob(resolve,'image/jpeg',.62));
+  if(!blob){
+    const b64=url.split(',')[1],bin=atob(b64),bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+    blob=new Blob([bytes],{type:'image/jpeg'});
+  }
+  return {url,blob,width:tw,height:th};
+}
+
 async function decodeFile(file){
   const ext=file.name.split('.').pop().toLowerCase();
   const isTiff=ext==='tif'||ext==='tiff';
@@ -151,6 +171,7 @@ async function decodeFile(file){
   const originalW=canvas.width, originalH=canvas.height;
   const maxW=parseInt($('#maxWidth').value,10);
   const q=Math.max(.5,Math.min(1,parseFloat($('#quality').value)||.9));
+  const thumb=await makeThumbFromCanvas(canvas);
 
   const nearTwoToOne = originalH>0 && Math.abs((originalW/originalH)-2) < 0.08;
   const alreadyOptimisedJpeg = isJpeg && nearTwoToOne && originalW<=maxW && originalH<=Math.round(maxW/2)+8;
@@ -169,6 +190,8 @@ async function decodeFile(file){
       originalHeight:originalH,
       blob:originalBlob,
       url:previewURL,
+      thumbBlob:thumb.blob,
+      thumbURL:thumb.url,
       selected:true
     };
   }
@@ -206,6 +229,8 @@ async function decodeFile(file){
     originalHeight:originalH,
     blob:jpegBlob,
     url:previewURL,
+    thumbBlob:thumb.blob,
+    thumbURL:thumb.url,
     selected:true
   };
 }
@@ -383,14 +408,14 @@ function preview(s){
 $('#clear').addEventListener('click',()=>{if(!confirm('Clear everything?'))return;S.scenes.forEach(s=>URL.revokeObjectURL(s.url));S.scenes=[];S.projects=[];if(S.preview){S.preview.destroy();S.preview=null;}$('#empty').style.display='grid';renderScenes();renderProjects();$('#status').textContent='No files loaded.'});
 
 function exportedHTML(p, scenes, filenames){
- const data=scenes.map((s,i)=>({title:(s.displayName || s.title),file:'images/'+filenames[i],thumb:'images/'+filenames[i],id:s.id}));
+ const data=scenes.map((s,i)=>({title:(s.displayName || s.title),file:'images/'+filenames[i],thumb:'thumbs/'+filenames[i],id:s.id}));
  const defaultIndex=Math.max(0,scenes.findIndex(s=>s.id===p.defaultSceneId));
  return `<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(p.name)}</title>
 <style>
 html,body{width:100%;height:100%;margin:0;background:#000;overflow:hidden;font-family:system-ui,-apple-system,Segoe UI,Arial}
 canvas{width:100%;height:100%;display:block;cursor:grab}canvas:active{cursor:grabbing}
-#menu{position:fixed;left:16px;right:16px;bottom:16px;z-index:2;display:flex;flex-wrap:wrap;gap:8px;padding:8px;border-radius:12px;background:rgba(0,0,0,.50);backdrop-filter:blur(8px);max-height:230px;overflow:auto;align-items:flex-start}
+#menu{position:fixed;left:16px;right:16px;bottom:16px;z-index:2;display:flex;flex-wrap:nowrap;gap:8px;padding:8px;border-radius:12px;background:rgba(0,0,0,.50);backdrop-filter:blur(8px);overflow-x:auto;overflow-y:hidden;align-items:flex-start;scrollbar-width:thin}
 #menu button{position:relative;border:1px solid rgba(255,255,255,.18);border-radius:9px;background:#111;padding:0;overflow:hidden;cursor:pointer;width:150px;height:90px;flex:0 0 150px}
 #menu button img{width:150px;height:90px;display:block;object-fit:cover}
 #menu button span{position:absolute;left:0;right:0;bottom:0;padding:7px 8px;color:#fff;background:linear-gradient(transparent,rgba(0,0,0,.82));font:12px system-ui;text-align:left}
@@ -413,10 +438,26 @@ function viewer(){
  let t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
  let yaw=0,pitch=0,fov=1.309,drag=false,lx=0,ly=0,dead=false,raf=0,token=0;
 
- function setImage(url){
-   const my=++token,img=new Image();
-   img.onload=()=>{if(dead||my!==token)return;gl.bindTexture(gl.TEXTURE_2D,t);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,0);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);yaw=0;pitch=0;if(!raf)draw()};
-   img.src=url;
+ function setImage(lowUrl,highUrl){
+   const my=++token;
+   const apply=(img,resetView)=>{if(dead||my!==token)return;gl.bindTexture(gl.TEXTURE_2D,t);gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,0);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,img);if(resetView){yaw=0;pitch=0}if(!raf)draw()};
+   const low=new Image();
+   low.onload=()=>{
+     if(dead||my!==token)return;
+     apply(low,true);
+     if(highUrl && highUrl!==lowUrl){
+       const high=new Image();
+       high.onload=()=>apply(high,false);
+       high.src=highUrl;
+     }
+   };
+   low.onerror=()=>{
+     if(!highUrl||dead||my!==token)return;
+     const high=new Image();
+     high.onload=()=>apply(high,true);
+     high.src=highUrl;
+   };
+   low.src=lowUrl||highUrl;
  }
  function draw(){if(dead||gl.isContextLost())return;let r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2),w=Math.max(2,Math.round(r.width*d)),h=Math.max(2,Math.round(r.height*d));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h)}gl.uniform2f(L.res,w,h);gl.uniform1f(L.yaw,yaw);gl.uniform1f(L.pitch,pitch);gl.uniform1f(L.fov,fov);gl.drawArrays(gl.TRIANGLES,0,6);raf=requestAnimationFrame(draw)}
  const dn=e=>{drag=true;lx=e.clientX;ly=e.clientY},mv=e=>{if(!drag)return;yaw-=(e.clientX-lx)*.005;pitch+=(e.clientY-ly)*.005;pitch=Math.max(-1.5,Math.min(1.5,pitch));lx=e.clientX;ly=e.clientY},up=()=>drag=false,wh=e=>{e.preventDefault();fov=Math.max(.45,Math.min(1.9,fov+e.deltaY*.001))};
@@ -424,13 +465,13 @@ function viewer(){
  return{setImage}
 }
 const V=viewer();
-function load(i){if(V)V.setImage(scenes[i].file)}
+function load(i){if(V)V.setImage(scenes[i].thumb,scenes[i].file)}
 function setActiveExport(i){
   [...menu.querySelectorAll('button')].forEach((b,idx)=>b.classList.toggle('active',idx===i));
 }
 scenes.forEach((s,i)=>{
   let b=document.createElement('button');
-  let img=document.createElement('img');img.src=s.thumb;img.alt=s.title+' thumbnail';
+  let img=document.createElement('img');img.loading='lazy';img.decoding='async';img.src=s.thumb;img.alt=s.title+' thumbnail';
   let label=document.createElement('span');label.textContent=s.title;
   b.appendChild(img);b.appendChild(label);
   b.addEventListener('click',()=>{load(i);setActiveExport(i)});
@@ -462,7 +503,7 @@ function previewProject(project){
     b.dataset.sceneId=scene.id;
 
     const img=document.createElement('img');
-    img.src=scene.url;
+    img.src=scene.thumbURL || scene.url;
     img.alt=(scene.displayName || scene.title)+' thumbnail';
 
     const label=document.createElement('span');
@@ -507,9 +548,11 @@ $('#export').addEventListener('click',async()=>{
   for(let pi=0;pi<S.projects.length;pi++){
    const p=S.projects[pi],folder=zip.folder(p.slug),scenes=p.ids.map(id=>S.scenes.find(s=>s.id===id)).filter(Boolean),names=[],used=new Set();
    scenes.forEach(s=>{let base=slugify(s.title),n=base+'.jpg',k=2;while(used.has(n))n=base+'-'+k++ +'.jpg';used.add(n);names.push(n)});
-   folder.file('index.html',exportedHTML(p,scenes,names));const imgs=folder.folder('images');scenes.forEach((s,i)=>imgs.file(names[i],s.blob));
+   folder.file('index.html',exportedHTML(p,scenes,names));
+   const imgs=folder.folder('images'),thumbs=folder.folder('thumbs');
+   scenes.forEach((s,i)=>{imgs.file(names[i],s.blob);thumbs.file(names[i],s.thumbBlob || s.blob)});
   }
-  zip.file('README.txt','Open each project folder/index.html. Drag to look around and use the mouse wheel to zoom. Upload the same folders to GitHub Pages for public links.');
+  zip.file('README.txt','Open each project folder/index.html. The tour shows a lightweight panorama first, then upgrades to full quality. Thumbnails stay in one horizontal row. Upload the same folders to GitHub Pages for public links.');
   const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}},m=>progress(m.percent,'Compressing '+Math.round(m.percent)+'%'));
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='360-project-websites-v2.zip';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),30000);progress(100,'ZIP ready.');
  }catch(e){alert('Export failed: '+e.message)}
