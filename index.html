@@ -42,8 +42,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
 </head>
 <body>
 <header>
-<h1>360 Portfolio Builder v3.2 — Automatic TIFF Optimisation</h1>
-<p>Upload original 8K TIFF/JPG/PNG → automatically create 4K website-ready JPG panoramas → preview → export project websites.</p>
+<h1>360 Portfolio Builder v3.3 — Mixed TIFF + JPG Support</h1>
+<p>Upload original 8K TIFF/JPG/PNG → automatically create 4K website-ready JPG panoramas → preview → export project websites. Already-optimised 4K JPG files can be mixed in and will be kept as-is.</p>
 </header>
 <main>
 <section class="panel stack">
@@ -51,7 +51,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
     <input id="files" type="file" multiple accept=".tif,.tiff,.jpg,.jpeg,.png">
   </label>
   <div id="drop" class="drop">Drag TIFF / JPG / PNG panoramas here</div>
-  <div class="hint"><strong>Recommended workflow:</strong> upload your original 8192 × 4096 TIFF files directly. The builder processes them locally in your browser and creates 4096 × 2048 JPG textures for the website.</div>
+  <div class="hint"><strong>Recommended workflow:</strong> upload your original 8192 × 4096 TIFF files directly. The builder processes them locally in your browser and creates 4096 × 2048 JPG textures for the website. If one problematic panorama has already been converted to a 4096 × 2048 JPG, you can mix that JPG with the TIFF files and the builder will keep that JPG as-is.</div>
 
   <label>Website panorama width
     <select id="maxWidth">
@@ -113,14 +113,25 @@ $('#projectName').addEventListener('input',e=>{if(!$('#slug').dataset.touched)$(
 $('#slug').addEventListener('input',e=>e.target.dataset.touched='1');
 
 function progress(p,t){$('#bar').style.width=Math.max(0,Math.min(100,p))+'%';if(t)$('#status').textContent=t}
+async function blobToDataURL(blob){
+  return await new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=()=>resolve(reader.result);
+    reader.onerror=()=>reject(reader.error||new Error('Could not read image data'));
+    reader.readAsDataURL(blob);
+  });
+}
+
 async function decodeFile(file){
   const ext=file.name.split('.').pop().toLowerCase();
+  const isTiff=ext==='tif'||ext==='tiff';
+  const isJpeg=ext==='jpg'||ext==='jpeg';
   const buf=await file.arrayBuffer();
 
   let canvas=document.createElement('canvas');
   let ctx=canvas.getContext('2d',{alpha:false});
 
-  if(ext==='tif'||ext==='tiff'){
+  if(isTiff){
     if(typeof UTIF==='undefined') throw new Error('TIFF decoder did not load');
     const ifds=UTIF.decode(buf);
     if(!ifds || !ifds.length) throw new Error('Could not decode TIFF');
@@ -139,6 +150,28 @@ async function decodeFile(file){
 
   const originalW=canvas.width, originalH=canvas.height;
   const maxW=parseInt($('#maxWidth').value,10);
+  const q=Math.max(.5,Math.min(1,parseFloat($('#quality').value)||.9));
+
+  const nearTwoToOne = originalH>0 && Math.abs((originalW/originalH)-2) < 0.08;
+  const alreadyOptimisedJpeg = isJpeg && nearTwoToOne && originalW<=maxW && originalH<=Math.round(maxW/2)+8;
+
+  if(alreadyOptimisedJpeg){
+    const originalBlob=new Blob([buf],{type:'image/jpeg'});
+    const previewURL=await blobToDataURL(originalBlob);
+    return {
+      id:crypto.randomUUID(),
+      name:file.name,
+      title:file.name.replace(/\.[^.]+$/,''),
+      displayName:file.name.replace(/\.[^.]+$/,''),
+      width:originalW,
+      height:originalH,
+      originalWidth:originalW,
+      originalHeight:originalH,
+      blob:originalBlob,
+      url:previewURL,
+      selected:true
+    };
+  }
 
   if(canvas.width>maxW){
     const targetH=Math.round(canvas.height*maxW/canvas.width);
@@ -151,14 +184,8 @@ async function decodeFile(file){
     canvas=c2;
   }
 
-  const q=Math.max(.5,Math.min(1,parseFloat($('#quality').value)||.9));
-
-  // IMPORTANT FIX:
-  // Use a data URL for PREVIEW instead of an object/blob URL.
-  // Some in-app / sandbox browsers block blob: image textures.
   const previewURL=canvas.toDataURL('image/jpeg',q);
 
-  // Keep a normal JPEG blob only for ZIP export.
   let jpegBlob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',q));
   if(!jpegBlob){
     const b64=previewURL.split(',')[1];
